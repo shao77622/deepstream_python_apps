@@ -296,6 +296,12 @@ def main(args):
     sink.set_property("async", False)
     sink.set_property("sync", 1)
 
+
+    if is_live:
+        print("Atleast one of the sources is live")
+        streammux.set_property('live-source', 1)
+
+
     streammux.set_property("width", 1920)
     streammux.set_property("height", 1080)
     streammux.set_property("batch-size", 1)
@@ -354,7 +360,7 @@ def main(args):
     bus.connect("message", bus_call, loop)
 
     # Start streaming
-    rtsp_port_num = 8554
+    rtsp_port_num = 8555
 
     server = GstRtspServer.RTSPServer.new()
     server.props.service = "%d" % rtsp_port_num

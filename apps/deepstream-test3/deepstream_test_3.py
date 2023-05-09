@@ -241,16 +241,16 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
         if not srcpad:
             sys.stderr.write("Unable to create src pad bin \n")
         srcpad.link(sinkpad)
-    queue1=Gst.ElementFactory.make("queue","queue1")
-    queue2=Gst.ElementFactory.make("queue","queue2")
-    queue3=Gst.ElementFactory.make("queue","queue3")
-    queue4=Gst.ElementFactory.make("queue","queue4")
-    queue5=Gst.ElementFactory.make("queue","queue5")
-    pipeline.add(queue1)
-    pipeline.add(queue2)
-    pipeline.add(queue3)
-    pipeline.add(queue4)
-    pipeline.add(queue5)
+    # queue1=Gst.ElementFactory.make("queue","queue1")
+    # queue2=Gst.ElementFactory.make("queue","queue2")
+    # queue3=Gst.ElementFactory.make("queue","queue3")
+    # queue4=Gst.ElementFactory.make("queue","queue4")
+    # queue5=Gst.ElementFactory.make("queue","queue5")
+    # pipeline.add(queue1)
+    # pipeline.add(queue2)
+    # pipeline.add(queue3)
+    # pipeline.add(queue4)
+    # pipeline.add(queue5)
 
     nvdslogger = None
 
@@ -284,6 +284,17 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
         sys.stderr.write(" Unable to create nvosd \n")
     nvosd.set_property('process-mode',OSD_PROCESS_MODE)
     nvosd.set_property('display-text',OSD_DISPLAY_TEXT)
+    nvvidconv_postosd = Gst.ElementFactory.make(
+        "nvvideoconvert", "convertor_postosd")
+    if not nvvidconv_postosd:
+        sys.stderr.write(" Unable to create nvvidconv_postosd \n")
+
+
+    # Create a caps filter
+    caps = Gst.ElementFactory.make("capsfilter", "filter")
+    caps.set_property(
+        "caps", Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420")
+    )
 
     if file_loop:
         if is_aarch64():
@@ -348,23 +359,34 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     pipeline.add(tiler)
     pipeline.add(nvvidconv)
     pipeline.add(nvosd)
+    pipeline.add(nvvidconv_postosd)
+    pipeline.add(caps)
     pipeline.add(sink)
 
     print("Linking elements in the Pipeline \n")
-    streammux.link(queue1)
-    queue1.link(pgie)
-    pgie.link(queue2)
-    if nvdslogger:
-        queue2.link(nvdslogger)
-        nvdslogger.link(tiler)
-    else:
-        queue2.link(tiler)
-    tiler.link(queue3)
-    queue3.link(nvvidconv)
-    nvvidconv.link(queue4)
-    queue4.link(nvosd)
-    nvosd.link(queue5)
-    queue5.link(sink)   
+    # streammux.link(queue1)
+    # queue1.link(pgie)
+    # pgie.link(queue2)
+    # if nvdslogger:
+    #     queue2.link(nvdslogger)
+    #     nvdslogger.link(tiler)
+    # else:
+    #     queue2.link(tiler)
+    # tiler.link(queue3)
+    # queue3.link(nvvidconv)
+    # nvvidconv.link(queue4)
+    # queue4.link(nvosd)
+    # nvosd.link(queue5)
+    # queue5.link(sink)
+
+    streammux.link(pgie)
+    pgie.link(tiler)
+    tiler.link(nvvidconv)
+    nvvidconv.link(nvosd)
+    nvosd.link(nvvidconv_postosd)
+    nvvidconv_postosd.link(caps)
+    caps.link(sink)
+
 
     # create an event loop and feed gstreamer bus mesages to it
     loop = GLib.MainLoop()
