@@ -27,6 +27,8 @@ gi.require_version('Gst', '1.0')
 from gi.repository import GLib, Gst
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
+from common.utils import long_to_uint64
+from collections import defaultdict
 
 import pyds
 
@@ -70,6 +72,15 @@ def osd_sink_pad_buffer_probe(pad,info,u_data):
         frame_number=frame_meta.frame_num
         num_rects = frame_meta.num_obj_meta
         l_obj=frame_meta.obj_meta_list
+
+
+
+        online_tlwhs = defaultdict(list)
+        online_scores = defaultdict(list)
+        online_ids = defaultdict(list)
+        mot_results = []
+
+
         while l_obj is not None:
             try:
                 # Casting l_obj.data to pyds.NvDsObjectMeta
@@ -77,10 +88,45 @@ def osd_sink_pad_buffer_probe(pad,info,u_data):
             except StopIteration:
                 break
             obj_counter[obj_meta.class_id] += 1
+
+            tlwh = [obj_meta.rect_params.left, obj_meta.rect_params.top, obj_meta.rect_params.width, obj_meta.rect_params.height]
+            tscore = obj_meta.confidence
+            tid = long_to_uint64(obj_meta.object_id)
+            online_tlwhs[0].append(tlwh)
+            online_ids[0].append(tid)
+            online_scores[0].append(tscore)
+
+            mot_results.append([online_tlwhs, online_scores, online_ids])
+
+
+
+
             try: 
                 l_obj=l_obj.next
             except StopIteration:
                 break
+
+        boxes, scores, ids = mot_results[0]  # batch size = 1 in MOT
+        mot_result = (frame_number + 1, boxes[0], scores[0],
+                          ids[0])  # single class
+        print(mot_result)
+        # statistic = flow_statistic(
+        #     mot_result,
+        #     self.secs_interval,
+        #     True,
+        #     False,
+        #     self.region_type,
+        #     video_fps,
+        #     entrance,
+        #     id_set,
+        #     interval_id_set,
+        #     in_id_list,
+        #     out_id_list,
+        #     prev_center,
+        #     records,
+        #     ids2names=self.mot_predictor.pred_config.labels)
+
+
 
         # Acquiring a display meta object. The memory ownership remains in
         # the C code so downstream plugins can still access it. Otherwise
@@ -166,6 +212,16 @@ def main(args):
     if(len(args)<2):
         sys.stderr.write("usage: %s <h264_elementary_stream> [0/1]\n" % args[0])
         sys.exit(1)
+
+
+    id_set = set()
+    interval_id_set = set()
+    in_id_list = list()
+    out_id_list = list()
+    prev_center = dict()
+    records = list()
+
+
 
     # Standard GStreamer initialization
     if(len(args)==3):
