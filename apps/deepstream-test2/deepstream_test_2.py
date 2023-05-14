@@ -28,6 +28,7 @@ from gi.repository import GLib, Gst
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 from common.utils import long_to_uint64
+from common.utils2 import flow_statistic
 from collections import defaultdict
 
 import pyds
@@ -38,7 +39,21 @@ PGIE_CLASS_ID_PERSON = 2
 PGIE_CLASS_ID_ROADSIGN = 3
 past_tracking_meta=[0]
 
+id_set = set()
+interval_id_set = set()
+in_id_list = list()
+out_id_list = list()
+prev_center = dict()
+records = list()
+
 def osd_sink_pad_buffer_probe(pad,info,u_data):
+    global id_set
+    global interval_id_set
+    global in_id_list
+    global out_id_list
+    global prev_center
+    global records
+
     frame_number=0
     #Intiallizing object counter with 0.
     obj_counter = {
@@ -109,24 +124,25 @@ def osd_sink_pad_buffer_probe(pad,info,u_data):
         boxes, scores, ids = mot_results[0]  # batch size = 1 in MOT
         mot_result = (frame_number + 1, boxes[0], scores[0],
                           ids[0])  # single class
-        print(mot_result)
-        # statistic = flow_statistic(
-        #     mot_result,
-        #     self.secs_interval,
-        #     True,
-        #     False,
-        #     self.region_type,
-        #     video_fps,
-        #     entrance,
-        #     id_set,
-        #     interval_id_set,
-        #     in_id_list,
-        #     out_id_list,
-        #     prev_center,
-        #     records,
-        #     ids2names=self.mot_predictor.pred_config.labels)
 
+        statistic = flow_statistic(
+            mot_result,
+            5,
+            True,
+            False,
+            'horizontal',
+            30,
+            [0, 720],
+            id_set,
+            interval_id_set,
+            in_id_list,
+            out_id_list,
+            prev_center,
+            records)
 
+        if frame_number % 30 == 0:
+            # print(mot_result)
+            print(statistic)
 
         # Acquiring a display meta object. The memory ownership remains in
         # the C code so downstream plugins can still access it. Otherwise
@@ -214,12 +230,7 @@ def main(args):
         sys.exit(1)
 
 
-    id_set = set()
-    interval_id_set = set()
-    in_id_list = list()
-    out_id_list = list()
-    prev_center = dict()
-    records = list()
+
 
 
 

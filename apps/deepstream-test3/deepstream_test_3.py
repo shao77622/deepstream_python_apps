@@ -320,7 +320,7 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     streammux.set_property('width', 1920)
     streammux.set_property('height', 1080)
     streammux.set_property('batch-size', number_sources)
-    streammux.set_property('batched-push-timeout', 4000000)
+    streammux.set_property('batched-push-timeout', 40000)
     if requested_pgie == "nvinferserver" and config != None:
         pgie.set_property('config-file-path', config)
     elif requested_pgie == "nvinferserver-grpc" and config != None:
@@ -380,6 +380,8 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
             # perf callback function to print fps every 5 sec
             GLib.timeout_add(5000, perf_data.perf_print_callback)
 
+    GLib.timeout_add_seconds(60, change_source, tiler, 1)
+
     # List the sources
     print("Now playing...")
     for i, source in enumerate(args):
@@ -395,6 +397,10 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     # cleanup
     print("Exiting app\n")
     pipeline.set_state(Gst.State.NULL)
+
+def change_source(tiler, i):
+    print("tiler changed\ntiler changed\ntiler changed\ntiler changed\ntiler changed\ntiler changed\ntiler changed\ntiler changed\ntiler changed\n")
+    tiler.set_property("show-source", i)
 
 def parse_args():
 
