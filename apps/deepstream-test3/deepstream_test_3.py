@@ -24,7 +24,8 @@ import gi
 import configparser
 import argparse
 gi.require_version('Gst', '1.0')
-from gi.repository import GLib, Gst
+gi.require_version('GstRtspServer', '1.0')
+from gi.repository import GLib, Gst, GstRtspServer
 from ctypes import *
 import time
 import sys
@@ -265,6 +266,38 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     if not pgie:
         sys.stderr.write(" Unable to create pgie :  %s\n" % requested_pgie)
 
+    tracker = Gst.ElementFactory.make("nvtracker", "tracker")
+    if not tracker:
+        sys.stderr.write(" Unable to create tracker \n")
+
+    #Set properties of tracker
+    config = configparser.ConfigParser()
+    config.read('dstest3_tracker_config.txt')
+    config.sections()
+
+    for key in config['tracker']:
+        if key == 'tracker-width' :
+            tracker_width = config.getint('tracker', key)
+            tracker.set_property('tracker-width', tracker_width)
+        if key == 'tracker-height' :
+            tracker_height = config.getint('tracker', key)
+            tracker.set_property('tracker-height', tracker_height)
+        if key == 'gpu-id' :
+            tracker_gpu_id = config.getint('tracker', key)
+            tracker.set_property('gpu_id', tracker_gpu_id)
+        if key == 'll-lib-file' :
+            tracker_ll_lib_file = config.get('tracker', key)
+            tracker.set_property('ll-lib-file', tracker_ll_lib_file)
+        if key == 'll-config-file' :
+            tracker_ll_config_file = config.get('tracker', key)
+            tracker.set_property('ll-config-file', tracker_ll_config_file)
+        if key == 'enable-batch-process' :
+            tracker_enable_batch_process = config.getint('tracker', key)
+            tracker.set_property('enable_batch_process', tracker_enable_batch_process)
+        if key == 'enable-past-frame' :
+            tracker_enable_past_frame = config.getint('tracker', key)
+            tracker.set_property('enable_past_frame', tracker_enable_past_frame)
+
     if disable_probe:
         # Use nvdslogger for perf measurement instead of probe function
         print ("Creating nvdslogger \n")
@@ -285,6 +318,51 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     nvosd.set_property('process-mode',OSD_PROCESS_MODE)
     nvosd.set_property('display-text',OSD_DISPLAY_TEXT)
 
+    nvvidconv_postosd = Gst.ElementFactory.make("nvvideoconvert", "convertor_postosd")
+    if not nvvidconv_postosd:
+        sys.stderr.write(" Unable to create nvvidconv_postosd \n")
+
+
+    # Create a caps filter
+    caps = Gst.ElementFactory.make("capsfilter", "filter")
+    caps.set_property("caps", Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420"))
+
+    # Make the encoder
+    if codec == "H264":
+        encoder = Gst.ElementFactory.make("nvv4l2h264enc", "encoder")
+        print("Creating H264 Encoder")
+    elif codec == "H265":
+        encoder = Gst.ElementFactory.make("nvv4l2h265enc", "encoder")
+        print("Creating H265 Encoder")
+    if not encoder:
+        sys.stderr.write(" Unable to create encoder")
+    encoder.set_property('bitrate', bitrate)
+    if is_aarch64():
+        encoder.set_property('preset-level', 1)
+        encoder.set_property('insert-sps-pps', 1)
+        #encoder.set_property('bufapi-version', 1)
+
+    # Make the payload-encode video into RTP packets
+    if codec == "H264":
+        rtppay = Gst.ElementFactory.make("rtph264pay", "rtppay")
+        print("Creating H264 rtppay")
+    elif codec == "H265":
+        rtppay = Gst.ElementFactory.make("rtph265pay", "rtppay")
+        print("Creating H265 rtppay")
+    if not rtppay:
+        sys.stderr.write(" Unable to create rtppay")
+
+    # Make the UDP sink
+    updsink_port_num = 5400
+    sink = Gst.ElementFactory.make("udpsink", "udpsink")
+    if not sink:
+        sys.stderr.write(" Unable to create udpsink")
+
+    sink.set_property('host', '224.224.255.255')
+    sink.set_property('port', updsink_port_num)
+    sink.set_property('async', False)
+    sink.set_property('sync', 1)
+
     if file_loop:
         if is_aarch64():
             # Set nvbuf-memory-type=4 for aarch64 for file-loop (nvurisrcbin case)
@@ -293,25 +371,25 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
             # Set nvbuf-memory-type=2 for x86 for file-loop (nvurisrcbin case)
             streammux.set_property('nvbuf-memory-type', 2)
 
-    if no_display:
-        print("Creating Fakesink \n")
-        sink = Gst.ElementFactory.make("fakesink", "fakesink")
-        sink.set_property('enable-last-sample', 0)
-        sink.set_property('sync', 0)
-    else:
-        if is_aarch64():
-            print("Creating nv3dsink \n")
-            sink = Gst.ElementFactory.make("nv3dsink", "nv3d-sink")
-            if not sink:
-                sys.stderr.write(" Unable to create nv3dsink \n")
-        else:
-            print("Creating EGLSink \n")
-            sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
-            if not sink:
-                sys.stderr.write(" Unable to create egl sink \n")
-
-    if not sink:
-        sys.stderr.write(" Unable to create sink element \n")
+    # if no_display:
+    #     print("Creating Fakesink \n")
+    #     sink = Gst.ElementFactory.make("fakesink", "fakesink")
+    #     sink.set_property('enable-last-sample', 0)
+    #     sink.set_property('sync', 0)
+    # else:
+    #     if is_aarch64():
+    #         print("Creating nv3dsink \n")
+    #         sink = Gst.ElementFactory.make("nv3dsink", "nv3d-sink")
+    #         if not sink:
+    #             sys.stderr.write(" Unable to create nv3dsink \n")
+    #     else:
+    #         print("Creating EGLSink \n")
+    #         sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
+    #         if not sink:
+    #             sys.stderr.write(" Unable to create egl sink \n")
+    #
+    # if not sink:
+    #     sys.stderr.write(" Unable to create sink element \n")
 
     if is_live:
         print("At least one of the sources is live")
@@ -343,17 +421,23 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
 
     print("Adding elements to Pipeline \n")
     pipeline.add(pgie)
+    pipeline.add(tracker)
     if nvdslogger:
         pipeline.add(nvdslogger)
     pipeline.add(tiler)
     pipeline.add(nvvidconv)
     pipeline.add(nvosd)
+    pipeline.add(nvvidconv_postosd)
+    pipeline.add(caps)
+    pipeline.add(encoder)
+    pipeline.add(rtppay)
     pipeline.add(sink)
 
     print("Linking elements in the Pipeline \n")
     streammux.link(queue1)
     queue1.link(pgie)
-    pgie.link(queue2)
+    pgie.link(tracker)
+    tracker.link(queue2)
     if nvdslogger:
         queue2.link(nvdslogger)
         nvdslogger.link(tiler)
@@ -364,13 +448,37 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     nvvidconv.link(queue4)
     queue4.link(nvosd)
     nvosd.link(queue5)
-    queue5.link(sink)   
+    queue5.link(nvvidconv_postosd)
+    nvvidconv_postosd.link(caps)
+    caps.link(encoder)
+    encoder.link(rtppay)
+    rtppay.link(sink)
+
 
     # create an event loop and feed gstreamer bus mesages to it
     loop = GLib.MainLoop()
     bus = pipeline.get_bus()
     bus.add_signal_watch()
     bus.connect ("message", bus_call, loop)
+
+    # Start streaming
+    rtsp_port_num = 8555
+
+    server = GstRtspServer.RTSPServer.new()
+    server.props.service = "%d" % rtsp_port_num
+    server.attach(None)
+
+    factory = GstRtspServer.RTSPMediaFactory.new()
+    factory.set_launch( "( udpsrc name=pay0 port=%d buffer-size=524288 caps=\"application/x-rtp, media=video, clock-rate=90000, encoding-name=(string)%s, payload=96 \" )" % (updsink_port_num, codec))
+    factory.set_shared(True)
+    server.get_mount_points().add_factory("/ds-test", factory)
+
+    print("\n *** DeepStream: Launched RTSP Streaming at rtsp://localhost:%d/ds-test ***\n\n" % rtsp_port_num)
+
+
+
+
+
     pgie_src_pad=pgie.get_static_pad("src")
     if not pgie_src_pad:
         sys.stderr.write(" Unable to get src pad \n")
@@ -416,7 +524,7 @@ def parse_args():
         required=True,
     )
     parser.add_argument(
-        "-c",
+        "-f",
         "--configfile",
         metavar="config_location.txt",
         default=None,
@@ -458,6 +566,10 @@ def parse_args():
         dest='silent',
         help="Disable verbose output",
     )
+    parser.add_argument("-c", "--codec", default="H264",
+                        help="RTSP Streaming Codec H264/H265 , default=H264", choices=['H264','H265'])
+    parser.add_argument("-b", "--bitrate", default=4000000,
+                        help="Set the encoding bitrate ", type=int)
     # Check input arguments
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -471,6 +583,10 @@ def parse_args():
     global no_display
     global silent
     global file_loop
+    global codec
+    global bitrate
+    codec = args.codec
+    bitrate = args.bitrate
     no_display = args.no_display
     silent = args.silent
     file_loop = args.file_loop
