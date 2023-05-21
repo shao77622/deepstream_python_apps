@@ -36,7 +36,7 @@ display-font-size=12
 enable=1
 #ROI to filter select objects, and remove from meta data
 roi-RF=295;643;1200;634;1200;913;56;828
-roi-RF2=295;443;1200;434;1200;613;56;628
+roi-RF2=295;100;1200;100;1200;613;56;628
 #remove objects in the ROI
 inverse-roi=0
 class-id=-1

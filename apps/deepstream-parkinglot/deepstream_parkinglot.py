@@ -33,6 +33,8 @@ from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 from common.FPS import PERF_DATA
 
+import event_processor
+
 import pyds
 
 perf_data = None
@@ -51,6 +53,8 @@ GST_CAPS_FEATURES_NVMM="memory:NVMM"
 OSD_PROCESS_MODE= 0
 OSD_DISPLAY_TEXT= 1
 pgie_classes_str= ["Vehicle", "TwoWheeler", "Person","RoadSign"]
+ROI_TIME_THRESHOLD= 1
+roi_monitor = event_processor.RoiMonitor(ROI_TIME_THRESHOLD)
 
 # nvanlytics_src_pad_buffer_probe  will extract metadata received on nvtiler sink pad
 # and update params for drawing rectangle, object information etc.
@@ -88,6 +92,9 @@ def nvanalytics_src_pad_buffer_probe(pad,info,u_data):
         PGIE_CLASS_ID_BICYCLE:0,
         PGIE_CLASS_ID_ROADSIGN:0
         }
+
+        lc_objects = []
+        roi_objects = []
         print("#"*50)
         while l_obj:
             try: 
@@ -98,6 +105,8 @@ def nvanalytics_src_pad_buffer_probe(pad,info,u_data):
                 break
             obj_counter[obj_meta.class_id] += 1
             l_user_meta = obj_meta.obj_user_meta_list
+            lc_object = None
+            roi_object = None
             # Extract object level meta data from NvDsAnalyticsObjInfo
             while l_user_meta:
                 try:
@@ -105,9 +114,14 @@ def nvanalytics_src_pad_buffer_probe(pad,info,u_data):
                     if user_meta.base_meta.meta_type == pyds.nvds_get_user_meta_type("NVIDIA.DSANALYTICSOBJ.USER_META"):             
                         user_meta_data = pyds.NvDsAnalyticsObjInfo.cast(user_meta.user_meta_data)
                         if user_meta_data.dirStatus: print("Object {0} moving in direction: {1}".format(obj_meta.object_id, user_meta_data.dirStatus))                    
-                        if user_meta_data.lcStatus: print("Object {0} line crossing status: {1}".format(obj_meta.object_id, user_meta_data.lcStatus))
+                        if user_meta_data.lcStatus:
+                            print("Object {0} line crossing status: {1}".format(obj_meta.object_id, user_meta_data.lcStatus))
+                            lc_object = event_processor.EventObject(obj_meta.class_id, obj_meta.object_id, None, user_meta_data.lcStatus)
                         if user_meta_data.ocStatus: print("Object {0} overcrowding status: {1}".format(obj_meta.object_id, user_meta_data.ocStatus))
-                        if user_meta_data.roiStatus: print("Object {0} roi status: {1}".format(obj_meta.object_id, user_meta_data.roiStatus))
+                        if user_meta_data.roiStatus:
+                            print("Object {0} roi status: {1}".format(obj_meta.object_id, user_meta_data.roiStatus))
+                            roi_object = event_processor.EventObject(obj_meta.class_id, obj_meta.object_id, user_meta_data.roiStatus, None)
+
                 except StopIteration:
                     break
 
@@ -115,11 +129,19 @@ def nvanalytics_src_pad_buffer_probe(pad,info,u_data):
                     l_user_meta = l_user_meta.next
                 except StopIteration:
                     break
+            if lc_object:
+                lc_objects.append(lc_object)
+            if roi_object:
+                roi_objects.append(roi_object)
             try: 
                 l_obj=l_obj.next
             except StopIteration:
                 break
-    
+
+        # custom event process
+        roi_monitor.update_roi_objects_with_previous(roi_objects)
+        event_processor.line_crossing_event_message_notify(lc_objects)
+
         # Get meta data from NvDsAnalyticsFrameMeta
         l_user = frame_meta.frame_user_meta_list
         while l_user:
