@@ -22,7 +22,8 @@ sys.path.append('../')
 import gi
 import configparser
 gi.require_version('Gst', '1.0')
-from gi.repository import GLib, Gst
+gi.require_version('GstRtspServer', '1.0')
+from gi.repository import GLib, Gst, GstRtspServer
 from ctypes import *
 import time
 import sys
@@ -311,16 +312,45 @@ def main(args):
     nvosd.set_property('process-mode',OSD_PROCESS_MODE)
     nvosd.set_property('display-text',OSD_DISPLAY_TEXT)
 
+
+    nvvidconv_postosd = Gst.ElementFactory.make("nvvideoconvert", "convertor_postosd")
+    if not nvvidconv_postosd:
+        sys.stderr.write(" Unable to create nvvidconv_postosd \n")
+
+
+    # Create a caps filter
+    caps = Gst.ElementFactory.make("capsfilter", "filter")
+    caps.set_property("caps", Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420"))
+
+    # Make the encoder
+    encoder = Gst.ElementFactory.make("nvv4l2h264enc", "encoder")
+    print("Creating H264 Encoder")
+    if not encoder:
+        sys.stderr.write(" Unable to create encoder")
+    encoder.set_property('bitrate', 4000000)
     if is_aarch64():
-        print("Creating nv3dsink \n")
-        sink = Gst.ElementFactory.make("nv3dsink", "nv3d-sink")
-        if not sink:
-            sys.stderr.write(" Unable to create nv3dsink \n")
-    else:
-        print("Creating EGLSink \n")
-        sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
-        if not sink:
-            sys.stderr.write(" Unable to create egl sink \n")
+        encoder.set_property('preset-level', 1)
+        encoder.set_property('insert-sps-pps', 1)
+        #encoder.set_property('bufapi-version', 1)
+
+    # Make the payload-encode video into RTP packets
+    rtppay = Gst.ElementFactory.make("rtph264pay", "rtppay")
+    print("Creating H264 rtppay")
+    if not rtppay:
+        sys.stderr.write(" Unable to create rtppay")
+
+    # Make the UDP sink
+    updsink_port_num = 5400
+    sink = Gst.ElementFactory.make("udpsink", "udpsink")
+    if not sink:
+        sys.stderr.write(" Unable to create udpsink")
+
+    sink.set_property('host', '224.224.255.255')
+    sink.set_property('port', updsink_port_num)
+    sink.set_property('async', False)
+    sink.set_property('sync', 1)
+
+
 
     if is_live:
         print("Atleast one of the sources is live")
@@ -378,6 +408,10 @@ def main(args):
     pipeline.add(tiler)
     pipeline.add(nvvidconv)
     pipeline.add(nvosd)
+    pipeline.add(nvvidconv_postosd)
+    pipeline.add(caps)
+    pipeline.add(encoder)
+    pipeline.add(rtppay)
     pipeline.add(sink)
 
     # We link elements in the following order:
@@ -397,13 +431,34 @@ def main(args):
     nvvidconv.link(queue6)
     queue6.link(nvosd)
     nvosd.link(queue7)
-    queue7.link(sink)
+    queue7.link(nvvidconv_postosd)
+    nvvidconv_postosd.link(caps)
+    caps.link(encoder)
+    encoder.link(rtppay)
+    rtppay.link(sink)
 
     # create an event loop and feed gstreamer bus mesages to it
     loop = GLib.MainLoop()
     bus = pipeline.get_bus()
     bus.add_signal_watch()
     bus.connect ("message", bus_call, loop)
+
+    # Start streaming
+    rtsp_port_num = 8555
+
+    server = GstRtspServer.RTSPServer.new()
+    server.props.service = "%d" % rtsp_port_num
+    server.attach(None)
+
+    factory = GstRtspServer.RTSPMediaFactory.new()
+    factory.set_launch( "( udpsrc name=pay0 port=%d buffer-size=524288 caps=\"application/x-rtp, media=video, clock-rate=90000, encoding-name=(string)%s, payload=96 \" )" % (updsink_port_num, "H264"))
+    factory.set_shared(True)
+    server.get_mount_points().add_factory("/ds-test", factory)
+
+    print("\n *** DeepStream: Launched RTSP Streaming at rtsp://localhost:%d/ds-test ***\n\n" % rtsp_port_num)
+
+
+
     nvanalytics_src_pad=nvanalytics.get_static_pad("src")
     if not nvanalytics_src_pad:
         sys.stderr.write(" Unable to get src pad \n")

@@ -34,6 +34,8 @@ import platform
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 from common.FPS import PERF_DATA
+from common.utils import long_to_uint64
+from roadway_process import roadway_event, object, objectCacher
 
 import pyds
 
@@ -56,10 +58,11 @@ GST_CAPS_FEATURES_NVMM="memory:NVMM"
 OSD_PROCESS_MODE= 0
 OSD_DISPLAY_TEXT= 1
 pgie_classes_str= ["Vehicle", "TwoWheeler", "Person","RoadSign"]
+cacher = objectCacher()
 
 # pgie_src_pad_buffer_probe  will extract metadata received on tiler sink pad
 # and update params for drawing rectangle, object information etc.
-def pgie_src_pad_buffer_probe(pad,info,u_data):
+def tracker_src_pad_buffer_probe(pad,info,u_data):
     frame_number=0
     num_rects=0
     got_fps = False
@@ -92,6 +95,9 @@ def pgie_src_pad_buffer_probe(pad,info,u_data):
         PGIE_CLASS_ID_BICYCLE:0,
         PGIE_CLASS_ID_ROADSIGN:0
         }
+        # for roadway_process
+        objects = []
+
         while l_obj is not None:
             try: 
                 # Casting l_obj.data to pyds.NvDsObjectMeta
@@ -99,12 +105,24 @@ def pgie_src_pad_buffer_probe(pad,info,u_data):
             except StopIteration:
                 break
             obj_counter[obj_meta.class_id] += 1
-            try: 
+
+            # for roadway_process
+            process_object = object([int(obj_meta.rect_params.left), int(obj_meta.rect_params.top), int(obj_meta.rect_params.left+obj_meta.rect_params.width),\
+                                     int(obj_meta.rect_params.top + obj_meta.rect_params.height)], obj_meta.object_id)
+            # print(process_object.id, process_object.pos)
+            objects.append(process_object)
+            #tscore = obj_meta.confidence
+
+            try:
                 l_obj=l_obj.next
             except StopIteration:
                 break
         if not silent:
-            print("Frame Number=", frame_number, "Number of Objects=",num_rects,"Vehicle_count=",obj_counter[PGIE_CLASS_ID_VEHICLE],"Person_count=",obj_counter[PGIE_CLASS_ID_PERSON])
+            print("source_id=",frame_meta.source_id ,"Frame Number=", frame_number, "Number of Objects=",num_rects,"Vehicle_count=",obj_counter[PGIE_CLASS_ID_VEHICLE],"Person_count=",obj_counter[PGIE_CLASS_ID_PERSON])
+
+        # for roadway_process
+        roadway_event(objects, cacher)
+
 
         # Update frame rate through this probe
         stream_index = "stream{0}".format(frame_meta.pad_index)
@@ -479,12 +497,12 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
 
 
 
-    pgie_src_pad=pgie.get_static_pad("src")
-    if not pgie_src_pad:
+    tracker_src_pad=tracker.get_static_pad("src")
+    if not tracker_src_pad:
         sys.stderr.write(" Unable to get src pad \n")
     else:
         if not disable_probe:
-            pgie_src_pad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, 0)
+            tracker_src_pad.add_probe(Gst.PadProbeType.BUFFER, tracker_src_pad_buffer_probe, 0)
             # perf callback function to print fps every 5 sec
             GLib.timeout_add(5000, perf_data.perf_print_callback)
 
