@@ -62,7 +62,6 @@ g_source_object_dict = {}
 
 pipeline = None
 streammux = None
-pgie = None
 
 pgie_classes_str = ["Vehicle", "TwoWheeler", "Person", "RoadSign"]
 ROI_TIME_THRESHOLD = 1
@@ -254,6 +253,7 @@ def decodebin_child_added(child_proxy, Object, name, user_data):
 
 def create_source_bin(source_id, uri):
     global g_source_object_dict
+    global pipeline
     print("Creating source bin")
 
     g_source_object_dict[source_id] = SourceObject(source_id, uri, None, True)
@@ -406,7 +406,6 @@ def bus_call(bus, message, loop):
 def main(args):
     global pipeline
     global streammux
-    global pgie
     global g_source_object_dict
 
     # Check input arguments
